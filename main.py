@@ -41,13 +41,24 @@ def save_todo_to_db(db_url, email_id, title, category, importance, deadline, det
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM todos WHERE email_id = %s", (email_id,))
             if cur.fetchone() is None:
-                cur.execute(
-                    """
-                    INSERT INTO todos (email_id, title, category, importance, deadline, details, summary, completed)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
-                    """,
-                    (email_id, title, category, importance, deadline, details, summary),
-                )
+                # Dynamically insert summary if supported, or fallback safely
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO todos (email_id, title, category, importance, deadline, details, summary, completed)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
+                        """,
+                        (email_id, title, category, importance, deadline, details, summary),
+                    )
+                except psycopg2.errors.UndefinedColumn:
+                    conn.rollback()
+                    cur.execute(
+                        """
+                        INSERT INTO todos (email_id, title, category, importance, deadline, details, completed)
+                        VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+                        """,
+                        (email_id, title, category, importance, deadline, details),
+                    )
                 conn.commit()
         conn.close()
     except Exception as e:
@@ -60,14 +71,27 @@ def load_todos_from_db(db_url):
         if not conn:
             return []
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, title, category, importance, deadline, details, completed, summary 
-                FROM todos 
-                ORDER BY id DESC
-                """
-            )
-            rows = cur.fetchall()
+            # Try selecting with summary first
+            try:
+                cur.execute(
+                    """
+                    SELECT id, title, category, importance, deadline, details, completed, summary 
+                    FROM todos 
+                    ORDER BY id DESC
+                    """
+                )
+                rows = cur.fetchall()
+            except psycopg2.errors.UndefinedColumn:
+                # Fallback if summary column has not been added yet
+                conn.rollback()
+                cur.execute(
+                    """
+                    SELECT id, title, category, importance, deadline, details, completed, 'No summary available' as summary 
+                    FROM todos 
+                    ORDER BY id DESC
+                    """
+                )
+                rows = cur.fetchall()
         conn.close()
         return rows
     except Exception as e:
@@ -231,7 +255,7 @@ def analyze_emails_with_ai(emails, api_key):
         user_content = json.dumps(emails, indent=2)
 
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-2.5-flash",
             contents=user_content,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -290,7 +314,7 @@ if st.button("📥 Fetch & Parse Emails", type="primary"):
                             task.get("link_or_details", ""),
                             item.get("summary", "No summary generated."),
                         )
-                st.success("New tasks and summaries saved to database successfully!")
+                st.success("New tasks saved to database successfully!")
                 st.rerun()
 
 # --- DISPLAY DATABASE PERSISTED TASKS ---
@@ -329,7 +353,7 @@ if db_url:
                         f"**{title}** &nbsp; `{badge}` &nbsp; `📁 {category}`"
                     )
                     st.markdown(f"🗓️ **Deadline / Key Dates:** `{deadline}`")
-                    st.caption(f"📝 **3-Line Summary:** {summary or 'N/A'}")
+                    st.caption(f"📝 **Summary:** {summary or 'N/A'}")
                     if details:
                         st.caption(f"ℹ️ **Next Steps / Links:** {details}")
                     st.markdown("---")
