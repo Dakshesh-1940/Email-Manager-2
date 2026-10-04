@@ -41,24 +41,13 @@ def save_todo_to_db(db_url, email_id, title, category, importance, deadline, det
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM todos WHERE email_id = %s", (email_id,))
             if cur.fetchone() is None:
-                # Dynamically insert summary if supported, or fallback safely
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO todos (email_id, title, category, importance, deadline, details, summary, completed)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
-                        """,
-                        (email_id, title, category, importance, deadline, details, summary),
-                    )
-                except psycopg2.errors.UndefinedColumn:
-                    conn.rollback()
-                    cur.execute(
-                        """
-                        INSERT INTO todos (email_id, title, category, importance, deadline, details, completed)
-                        VALUES (%s, %s, %s, %s, %s, %s, FALSE)
-                        """,
-                        (email_id, title, category, importance, deadline, details),
-                    )
+                cur.execute(
+                    """
+                    INSERT INTO todos (email_id, title, category, importance, deadline, details, summary, completed)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
+                    """,
+                    (email_id, title, category, importance, deadline, details, summary),
+                )
                 conn.commit()
         conn.close()
     except Exception as e:
@@ -71,27 +60,14 @@ def load_todos_from_db(db_url):
         if not conn:
             return []
         with conn.cursor() as cur:
-            # Try selecting with summary first
-            try:
-                cur.execute(
-                    """
-                    SELECT id, title, category, importance, deadline, details, completed, summary 
-                    FROM todos 
-                    ORDER BY id DESC
-                    """
-                )
-                rows = cur.fetchall()
-            except psycopg2.errors.UndefinedColumn:
-                # Fallback if summary column has not been added yet
-                conn.rollback()
-                cur.execute(
-                    """
-                    SELECT id, title, category, importance, deadline, details, completed, 'No summary available' as summary 
-                    FROM todos 
-                    ORDER BY id DESC
-                    """
-                )
-                rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT id, title, category, importance, deadline, details, completed, summary 
+                FROM todos 
+                ORDER BY id DESC
+                """
+            )
+            rows = cur.fetchall()
         conn.close()
         return rows
     except Exception as e:
