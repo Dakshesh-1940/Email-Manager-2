@@ -255,7 +255,7 @@ def analyze_emails_with_ai(emails, api_key):
         user_content = json.dumps(emails, indent=2)
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=user_content,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
