@@ -125,16 +125,29 @@ def fetch_emails(imap_server, email_user, email_pass, folder="INBOX", limit=10):
         mail.login(email_user, email_pass)
         mail.select(folder)
 
-        status, messages = mail.search(None, "UNSEEN")
-        email_ids = messages[0].split()
+        # 1. Search for UNSEEN (unread) emails first
+        status, unseen_msg = mail.search(None, "UNSEEN")
+        unseen_ids = unseen_msg[0].split() if status == "OK" and unseen_msg[0] else []
 
-        if not email_ids:
-            status, messages = mail.search(None, "ALL")
-            email_ids = messages[0].split()
+        selected_ids = []
 
-        latest_ids = email_ids[-limit:]
+        if len(unseen_ids) >= limit:
+            selected_ids = unseen_ids[-limit:]
+        else:
+            selected_ids = list(unseen_ids)
+            needed_count = limit - len(selected_ids)
 
-        for e_id in reversed(latest_ids):
+            # 2. Search ALL emails to fill remaining slots
+            status, all_msg = mail.search(None, "ALL")
+            all_ids = all_msg[0].split() if status == "OK" and all_msg[0] else []
+
+            # Deduplicate
+            unseen_set = set(unseen_ids)
+            remaining_ids = [e_id for e_id in all_ids if e_id not in unseen_set]
+            selected_ids.extend(remaining_ids[-needed_count:])
+
+        # 3. Process email details (newest first)
+        for e_id in reversed(selected_ids):
             _, msg_data = mail.fetch(e_id, "(RFC822)")
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
@@ -147,18 +160,11 @@ def fetch_emails(imap_server, email_user, email_pass, folder="INBOX", limit=10):
                     if msg.is_multipart():
                         for part in msg.walk():
                             content_type = part.get_content_type()
-                            content_disposition = str(
-                                part.get("Content-Disposition")
-                            )
-                            if (
-                                content_type == "text/plain"
-                                and "attachment" not in content_disposition
-                            ):
+                            content_disposition = str(part.get("Content-Disposition"))
+                            if content_type == "text/plain" and "attachment" not in content_disposition:
                                 payload = part.get_payload(decode=True)
                                 if payload:
-                                    body = payload.decode(
-                                        "utf-8", errors="ignore"
-                                    )
+                                    body = payload.decode("utf-8", errors="ignore")
                                     break
                     else:
                         payload = msg.get_payload(decode=True)
@@ -171,7 +177,7 @@ def fetch_emails(imap_server, email_user, email_pass, folder="INBOX", limit=10):
                             "subject": subject,
                             "sender": sender,
                             "date": date,
-                            "body": clean_body_text(body[:2000]),
+                            "body": clean_body_text(body[:1000]),
                         }
                     )
 
